@@ -1,0 +1,63 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User{
+  id        String @id @default(cuid())
+  clerkId   String @unique
+  email     String @unique
+  username  String @unique
+  name      String?
+  avatar    String?
+  createdAt DateTime @default(now())
+
+
+//relation
+  sender  Message[] @relation("messageSent")
+  receiver  Message[] @relation("messageReceived")
+
+
+  follower  Follow[] @relation("heFollow")
+  following Follow[] @relation("iFollow")
+
+}
+
+model Message{
+  id            String @id @default(cuid())
+  content       String
+  senderId      String
+  receiverId    String
+  createdAt     DateTime @default(now())
+
+  //relation
+  sender    User @relation("messageSent", fields: [senderId], references: [id])
+  receiver  User @relation("messageReceived", fields: [receiverId], references: [id])
+
+  @@index([senderId])
+  @@index([receiverId])
+}
+
+
+
+model Follow{
+  id          String @id @default(cuid())
+  followerId  String
+  followingId String
+
+
+  //relation
+
+  follower  User @relation("heFollow", fields: [followerId], references: [id])
+  following  User @relation("iFollow", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+
+}
