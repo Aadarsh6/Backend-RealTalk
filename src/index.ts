@@ -57,7 +57,7 @@ app.get('/health/', (req, res)=>{
 //api routs creation
 
 app.use('/api/auth', authRoutes);
-app.use('/api/messages', messagesRoutes);
+app.use('/api/messages', messagesRouter);
 app.use('/api/users', usersRoutes);
 
 app.use('*', (req, res)=>{
