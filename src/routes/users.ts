@@ -104,9 +104,14 @@ router.get("/online",  validateClerkToken, asyncHandler(async (req, res)=>{
             isOnline = userSockets.has(userExists.clerkId);
         }
         console.log(`🔍 Checking online status for user ${userExists.username}: ${isOnline ? 'Online' : 'Offline'}`);
+        res.json({
+            userId: checkUserID,
+            clerkId: userExists.clerkId,
+            username: userExists.username,
+            isOnline
+            });
 
 
-        
     } catch (error) {
         console.error("❌ Error checking user online status:", error);
         res.status(500).json({ error: "Server error" });

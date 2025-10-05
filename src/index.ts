@@ -63,8 +63,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
 
-// 404 handler
-app.use('*', (req, res) => {
+// 404 handler - must be last route  
+app.use((req, res) => {
     res.status(404).json({
         error: 'Route not found',
         path: req.originalUrl,
