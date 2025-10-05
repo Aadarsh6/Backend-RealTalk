@@ -1,8 +1,8 @@
 import express from "express"
 import z from "zod"
-import { asyncHandler } from "../middleware/asyncHandlers";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../lib/prisma";
-import { validateClerkToken } from "../middleware/validateClerkToken";
+import { validateClerkToken } from "../middleware/auth";
 
 const router = express.Router()
 
@@ -104,6 +104,9 @@ router.get("/online",  validateClerkToken, asyncHandler(async (req, res)=>{
             isOnline = userSockets.has(userExists.clerkId);
         }
         console.log(`🔍 Checking online status for user ${userExists.username}: ${isOnline ? 'Online' : 'Offline'}`);
+
+
+        
     } catch (error) {
         console.error("❌ Error checking user online status:", error);
         res.status(500).json({ error: "Server error" });

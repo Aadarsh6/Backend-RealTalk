@@ -1,8 +1,8 @@
 import express from "express";
 import z from "zod";
-import { asyncHandler } from "../middleware/asyncHandlers";
+import { asyncHandler } from "../middleware/asyncHandler";
 import { prisma } from "../lib/prisma";
-import { validateClerkToken } from "../middleware/validateClerkToken";
+import { validateClerkToken } from "../middleware/auth";
 
 const router = express.Router();
 

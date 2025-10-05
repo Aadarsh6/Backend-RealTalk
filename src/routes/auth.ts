@@ -1,12 +1,12 @@
 import express from "express"
 import { prisma } from "../lib/prisma";
-import { asyncHandler } from "../middleware/asyncHandlers";
+import { asyncHandler } from "../middleware/asyncHandler";
 
 const router = express.Router()
 
 router.post('/sync', asyncHandler(async(req, res)=>{
     //@ts-ignore
-    const { clerkUser } = res.body;
+    const { clerkUser } = req.body;
 
     if (!clerkUser) {
         return res.status(400).json({ error: 'Clerk user data required' });
