@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/asyncHandlers";
 const router = express.Router()
 
 router.post('/sync', asyncHandler(async(req, res)=>{
+    //@ts-ignore
     const { clerkUser } = res.body;
 
     if (!clerkUser) {
