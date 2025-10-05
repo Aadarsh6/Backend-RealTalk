@@ -2,6 +2,7 @@ import express from "express"
 import z from "zod"
 import { asyncHandler } from "../middleware/asyncHandlers";
 import { prisma } from "../lib/prisma";
+import { validateClerkToken } from "../middleware/validateClerkToken";
 
 const router = express.Router()
 

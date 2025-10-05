@@ -2,6 +2,7 @@ import express from "express";
 import z from "zod";
 import { asyncHandler } from "../middleware/asyncHandlers";
 import { prisma } from "../lib/prisma";
+import { validateClerkToken } from "../middleware/validateClerkToken";
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ const getMessageSchema = z.object({
     with: z.string().min(1, "Message content is required")
 })
 
-router.post('/', validateClerkTOken, asyncHandler(async (req, res)=>{
+router.post('/', validateClerkToken, asyncHandler(async (req, res)=>{
     //* Clerk gives you userId → but you rename it locally as clerkId.
     const { userId: clerkId } = req.auth!; //!The ! is a non-null assertion operator in TypeScript → telling TS “trust me, this will not be null or undefined”.
 
@@ -126,11 +127,11 @@ router.get('/', validateClerkToken, asyncHandler(async (req, res) => {
     const { userId: clerkId } = req.auth!;
     
     // Validate query parameters
-    const validation = getMessagesSchema.safeParse(req.query);
+    const validation = getMessageSchema.safeParse(req.query);
     if (!validation.success) {
         return res.status(400).json({
             error: "Invalid query parameters",
-            details: validation.error.errors
+            details: validation.error.issues
         });
     }
     

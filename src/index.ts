@@ -5,6 +5,14 @@ import dotenv from 'dotenv'
 import helmet from 'helmet';
 import { createServer } from 'http';
 
+// Import routes
+import authRoutes from './routes/auth';
+import messagesRoutes from './routes/messages';
+import usersRoutes from './routes/users';
+
+// Import socket handler
+import { initializeSocket } from './socket/socketHandler';
+
 
 dotenv.config()
 const app = express()
@@ -54,10 +62,10 @@ app.get('/health/', (req, res)=>{
     });
 });
 
-//api routs creation
+//api routes creation
 
 app.use('/api/auth', authRoutes);
-app.use('/api/messages', messagesRouter);
+app.use('/api/messages', messagesRoutes);
 app.use('/api/users', usersRoutes);
 
 app.use('*', (req, res)=>{
@@ -75,7 +83,7 @@ app.use('*', (req, res)=>{
 const io = initializeSocket(server)
 
 declare global {
-    var io: typeof io;
+    var io: any;
 }
 global.io = io
 
