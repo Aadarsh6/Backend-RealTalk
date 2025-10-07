@@ -41,6 +41,11 @@ const limiter = rateLimit({
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
+    skip: (req)=>{
+        //"::1" is equivalnet of "127.0.0" ie local host (this computer) in IPv6
+        const isLocalhost = req.ip === '127.0.0' || req.ip === '::1'
+        return isLocalhost;
+    },
 });
 app.use('/api/', limiter);
 
@@ -58,7 +63,12 @@ app.get('/health', (req, res) => {
     });
 });
 
-// API routes
+// API routes with versioning
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/messages', messageRoutes);
+app.use('/api/v1/users', userRoutes);
+
+// Legacy routes (for backward compatibility)
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
