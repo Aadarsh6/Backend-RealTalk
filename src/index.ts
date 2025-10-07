@@ -37,15 +37,23 @@ app.use(cors({
 // Rate limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: process.env.NODE_ENV === 'production' ? 200 : 100, // Higher limit in production
     message: 'Too many requests from this IP, please try again later.',
     standardHeaders: true,
     legacyHeaders: false,
-    skip: (req)=>{
-        //"::1" is equivalnet of "127.0.0" ie local host (this computer) in IPv6
-        const isLocalhost = req.ip === '127.0.0' || req.ip === '::1'
-        return isLocalhost;
-    },
+    // Trust proxy headers when behind a reverse proxy (Vercel, Heroku, etc.)
+    ...(process.env.NODE_ENV === 'production' && { 
+        trustProxy: true 
+    }),
+    skip: (req) => {
+        // Skip rate limiting for localhost in development only
+        if (process.env.NODE_ENV !== 'production') {
+              //"::1" is equivalnet of "127.0.0" ie local host (this computer) in IPv6
+            const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1';
+            return isLocalhost;
+        }
+        return false; // Don't skip anything in production
+    }
 });
 app.use('/api/', limiter);
 
