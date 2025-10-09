@@ -11,7 +11,6 @@ import messageRoutes from './routes/messages';
 import userRoutes from './routes/users';
 import { errorHandler } from './middleware/errorHandler';
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
@@ -46,7 +45,6 @@ const limiter = rateLimit({
         trustProxy: true 
     }),
     skip: (req) => {
-        // Skip rate limiting for localhost in development only
         if (process.env.NODE_ENV !== 'production') {
               //"::1" is equivalnet of "127.0.0" ie local host (this computer) in IPv6
             const isLocalhost = req.ip === '127.0.0.1' || req.ip === '::1';
