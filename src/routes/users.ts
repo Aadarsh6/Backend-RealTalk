@@ -6,7 +6,6 @@ import { validateClerkToken } from "../middleware/auth";
 
 const router = express.Router()
 
-//check validation schema
 
 const checkUserOnlineSchema = z.object({
     userId: z.string().min(1, "userId is required")
@@ -74,7 +73,7 @@ router.get("/", validateClerkToken, asyncHandler(async(req, res)=>{
 
 
 router.get("/online",  validateClerkToken, asyncHandler(async (req, res)=>{
-    const { userId: clerkId } = req.auth!;
+    const { userId: clerkId } = req.auth!; //todo check this
     //query parameter
     const validation = checkUserOnlineSchema.safeParse(req.query)
     if(!validation.success){
