@@ -1,7 +1,7 @@
 // src/routes/messages.ts - UPDATED (Fallback only, not primary)
 import express from "express";
 import z from "zod";
-import { asyncHandler } from "../middleware/asyncHandler";
+import { asyncHandler } from "../middleware/asyncHandlers";
 import { prisma } from "../lib/prisma";
 import { validateClerkToken } from "../middleware/auth";
 

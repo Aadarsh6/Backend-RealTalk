@@ -1,6 +1,6 @@
 import express from "express"
 import { prisma } from "../lib/prisma";
-import { asyncHandler } from "../middleware/asyncHandler";
+import { asyncHandler } from "../middleware/asyncHandlers";
 
 const router = express.Router()
 
