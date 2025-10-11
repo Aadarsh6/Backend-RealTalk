@@ -1,3 +1,4 @@
+// src/socket/socketHandler.ts - UPDATED VERSION
 import { Server } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import { prisma } from '../lib/prisma';
@@ -13,17 +14,22 @@ interface StopTypingData {
     fromUserId: string;
 }
 
+interface SendMessageData {
+    receiverId: string;
+    content: string;
+    tempId: string; // Client-generated temporary ID
+    timestamp: string;
+}
+
 // Helper function to sync user from Clerk to database
 async function syncUserFromClerk(clerkId: string): Promise<any> {
     try {
-        // Check if user exists
         let user = await prisma.user.findUnique({
             where: { clerkId }
         });
 
         if (!user) {
             console.log(`🆕 New user detected: ${clerkId}, needs sync from Clerk...`);
-            // User doesn't exist - they need to be synced via the auth/sync endpoint first
             return null;
         }
 
@@ -52,9 +58,12 @@ export function initializeSocket(server: HttpServer) {
 
     // Store user socket mappings (clerkId -> socketId)
     const userSockets = new Map<string, string>();
-
+    
     // Store socket user mappings (socketId -> clerkId)
     const socketUsers = new Map<string, string>();
+    
+    // Message queue for offline users (userId -> messages[])
+    const offlineMessageQueue = new Map<string, any[]>();
 
     io.on('connection', (socket) => {
         console.log(`✅ Socket connected: ${socket.id}`);
@@ -68,7 +77,6 @@ export function initializeSocket(server: HttpServer) {
             }
 
             try {
-                // Verify user exists in database
                 const user = await syncUserFromClerk(userId);
                 
                 if (!user) {
@@ -97,15 +105,25 @@ export function initializeSocket(server: HttpServer) {
                     avatar: user.avatar
                 });
 
-                // Send current online users count to all clients
+                // Send current online users count
                 io.emit('online-users-count', { count: userSockets.size });
 
-                // Send confirmation to the user
+                // Send confirmation
                 socket.emit('connection-confirmed', {
                     userId,
                     socketId: socket.id,
                     onlineCount: userSockets.size
                 });
+
+                // Deliver any queued offline messages
+                const queuedMessages = offlineMessageQueue.get(userId);
+                if (queuedMessages && queuedMessages.length > 0) {
+                    console.log(`📬 Delivering ${queuedMessages.length} queued messages to ${userId}`);
+                    queuedMessages.forEach(msg => {
+                        socket.emit('new-message', msg);
+                    });
+                    offlineMessageQueue.delete(userId);
+                }
 
                 console.log(`👥 Total online users: ${userSockets.size}`);
 
@@ -115,79 +133,194 @@ export function initializeSocket(server: HttpServer) {
             }
         });
 
-        // Handle typing indicators
-        socket.on('typing', (data: TypingData) => {
-            if (!data.toUserId || !data.fromUserId) {
-                console.log('❌ Invalid typing data:', data);
+        // ============================================
+        // SOCKET-FIRST MESSAGE SENDING
+        // ============================================
+        socket.on('send-message', async (data: SendMessageData) => {
+            const senderId = socketUsers.get(socket.id);
+            
+            if (!senderId) {
+                console.log('❌ Sender not identified');
+                socket.emit('message-error', { 
+                    tempId: data.tempId,
+                    error: 'Not authenticated' 
+                });
                 return;
             }
 
-            console.log(`⌨️ ${data.username || data.fromUserId} is typing to ${data.toUserId}`);
-            const targetSocketId = userSockets.get(data.toUserId);
+            console.log(`📨 [SOCKET] Message from ${senderId} to ${data.receiverId}`);
+            console.log(`📨 Content: "${data.content.substring(0, 50)}..."`);
 
+            try {
+                // Get sender and receiver from database
+                const [sender, receiver] = await Promise.all([
+                    prisma.user.findUnique({ where: { clerkId: senderId } }),
+                    prisma.user.findUnique({ where: { id: data.receiverId } })
+                ]);
+
+                if (!sender) {
+                    socket.emit('message-error', {
+                        tempId: data.tempId,
+                        error: 'Sender not found'
+                    });
+                    return;
+                }
+
+                if (!receiver) {
+                    socket.emit('message-error', {
+                        tempId: data.tempId,
+                        error: 'Receiver not found'
+                    });
+                    return;
+                }
+
+                // STEP 1: Immediately emit to receiver (if online)
+                const receiverSocketId = userSockets.get(receiver.clerkId);
+                const isReceiverOnline = !!receiverSocketId;
+
+                // Create the message object that will be sent
+                const pendingMessage = {
+                    tempId: data.tempId,
+                    content: data.content,
+                    createdAt: data.timestamp,
+                    sender: {
+                        id: sender.id,
+                        clerkId: sender.clerkId,
+                        username: sender.username,
+                        name: sender.name,
+                        avatar: sender.avatar
+                    },
+                    receiver: {
+                        id: receiver.id,
+                        clerkId: receiver.clerkId,
+                        username: receiver.username,
+                        name: receiver.name,
+                        avatar: receiver.avatar
+                    },
+                    status: 'sending'
+                };
+
+                // Send to receiver IMMEDIATELY if online
+                if (isReceiverOnline) {
+                    io.to(receiverSocketId!).emit('new-message', pendingMessage);
+                    console.log(`📤 [INSTANT] Message delivered to ${receiver.username}`);
+                } else {
+                    console.log(`📴 ${receiver.username} offline - queueing message`);
+                    // Queue for offline user
+                    if (!offlineMessageQueue.has(receiver.clerkId)) {
+                        offlineMessageQueue.set(receiver.clerkId, []);
+                    }
+                    // We'll add the real message later
+                }
+
+                // STEP 2: Save to database in background (non-blocking)
+                // Use setImmediate to ensure UI gets message first
+                setImmediate(async () => {
+                    try {
+                        const savedMessage = await prisma.message.create({
+                            data: {
+                                content: data.content,
+                                senderId: sender.id,
+                                receiverId: receiver.id
+                            },
+                            include: {
+                                sender: {
+                                    select: {
+                                        id: true,
+                                        clerkId: true,
+                                        username: true,
+                                        name: true,
+                                        avatar: true
+                                    }
+                                },
+                                receiver: {
+                                    select: {
+                                        id: true,
+                                        clerkId: true,
+                                        username: true,
+                                        name: true,
+                                        avatar: true
+                                    }
+                                }
+                            }
+                        });
+
+                        console.log(`💾 [DB] Message saved: ${savedMessage.id}`);
+
+                        // STEP 3: Send confirmation to sender with real DB ID
+                        socket.emit('message-confirmed', {
+                            tempId: data.tempId,
+                            message: savedMessage,
+                            deliveredTo: isReceiverOnline ? receiver.clerkId : null
+                        });
+
+                        // STEP 4: Update receiver with real message (replace temp)
+                        if (isReceiverOnline) {
+                            io.to(receiverSocketId!).emit('message-confirmed', {
+                                tempId: data.tempId,
+                                message: savedMessage
+                            });
+                        } else {
+                            // Add to offline queue with real DB data
+                            const queue = offlineMessageQueue.get(receiver.clerkId) || [];
+                            queue.push(savedMessage);
+                            offlineMessageQueue.set(receiver.clerkId, queue);
+                        }
+
+                    } catch (dbError: any) {
+                        console.error('❌ [DB] Failed to save message:', dbError);
+                        
+                        // Notify sender of failure
+                        socket.emit('message-failed', {
+                            tempId: data.tempId,
+                            error: 'Failed to save message'
+                        });
+
+                        // Notify receiver to remove the optimistic message
+                        if (isReceiverOnline) {
+                            io.to(receiverSocketId!).emit('message-failed', {
+                                tempId: data.tempId
+                            });
+                        }
+                    }
+                });
+
+            } catch (error: any) {
+                console.error('❌ Error handling send-message:', error);
+                socket.emit('message-error', {
+                    tempId: data.tempId,
+                    error: error.message || 'Failed to send message'
+                });
+            }
+        });
+
+        // Handle typing indicators
+        socket.on('typing', (data: TypingData) => {
+            if (!data.toUserId || !data.fromUserId) {
+                return;
+            }
+
+            const targetSocketId = userSockets.get(data.toUserId);
             if (targetSocketId) {
                 socket.to(targetSocketId).emit('user-typing', {
                     fromUserId: data.fromUserId,
                     username: data.username || 'Unknown User',
                 });
-                console.log(`📤 Typing indicator sent to socket ${targetSocketId}`);
-            } else {
-                console.log(`📴 Target user ${data.toUserId} not online`);
             }
         });
 
         // Handle stop typing
         socket.on('stop-typing', (data: StopTypingData) => {
             if (!data.toUserId || !data.fromUserId) {
-                console.log('❌ Invalid stop-typing data:', data);
                 return;
             }
 
-            console.log(`⌨️ User ${data.fromUserId} stopped typing to ${data.toUserId}`);
             const targetSocketId = userSockets.get(data.toUserId);
-
             if (targetSocketId) {
                 socket.to(targetSocketId).emit('user-stop-typing', {
                     fromUserId: data.fromUserId,
                 });
-                console.log(`📤 Stop typing indicator sent to socket ${targetSocketId}`);
             }
-        });
-
-        // Handle direct message sending (optional - messages are also sent via HTTP API)
-        socket.on('send-message', async (data: { 
-            receiverId: string; 
-            content: string;
-            messageId?: string;
-        }) => {
-            const senderId = socketUsers.get(socket.id);
-            
-            if (!senderId) {
-                console.log('❌ Sender not identified');
-                socket.emit('error', { message: 'Not authenticated' });
-                return;
-            }
-
-            console.log(`📨 Direct message from ${senderId} to ${data.receiverId}`);
-            
-            const receiverSocketId = userSockets.get(data.receiverId);
-            
-            if (receiverSocketId) {
-                socket.to(receiverSocketId).emit('new-message', {
-                    ...data,
-                    senderId,
-                    timestamp: new Date().toISOString()
-                });
-                console.log(`📤 Message delivered to ${data.receiverId}`);
-            } else {
-                console.log(`📴 Receiver ${data.receiverId} not online - message will be stored via API`);
-            }
-
-            // Confirm to sender
-            socket.emit('message-delivered', {
-                messageId: data.messageId,
-                delivered: !!receiverSocketId
-            });
         });
 
         // Handle read receipts
@@ -199,17 +332,7 @@ export function initializeSocket(server: HttpServer) {
                     messageId: data.messageId,
                     readAt: new Date().toISOString()
                 });
-                console.log(`✅ Read receipt sent for message ${data.messageId}`);
             }
-        });
-
-        // Handle connection errors
-        socket.on('error', (error) => {
-            console.error('❌ Socket error:', error);
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('❌ Connection error:', error);
         });
 
         // Handle disconnect
@@ -218,64 +341,32 @@ export function initializeSocket(server: HttpServer) {
             console.log(`📴 Socket disconnected: ${socket.id}, reason: ${reason}`);
 
             if (userId) {
-                // Clean up mappings
                 userSockets.delete(userId);
                 socketUsers.delete(socket.id);
 
-                // Notify other users about offline status
                 socket.broadcast.emit('user-offline-status', { userId });
-
-                // Send updated online users count
                 io.emit('online-users-count', { count: userSockets.size });
 
                 console.log(`👋 User ${userId} went offline`);
                 console.log(`👥 Total online users: ${userSockets.size}`);
-            } else {
-                console.log(`⚠️ Disconnected socket ${socket.id} had no associated user`);
             }
         });
 
-        // Handle ping/pong for connection health check
+        // Ping/pong for health check
         socket.on('ping', () => {
             socket.emit('pong', { timestamp: Date.now() });
         });
     });
 
-    // Store userSockets on io instance for API route access
+    // Store on io instance for API route access (fallback)
     (io as any).userSockets = userSockets;
     (io as any).socketUsers = socketUsers;
 
-    // Helper method to get online users list
-    (io as any).getOnlineUsers = () => {
-        return Array.from(userSockets.keys());
-    };
-
-    // Helper method to check if user is online
-    (io as any).isUserOnline = (userId: string) => {
-        return userSockets.has(userId);
-    };
-
-    // Helper method to get user socket
-    (io as any).getUserSocket = (userId: string) => {
-        return userSockets.get(userId);
-    };
-
-    // Helper method to emit to specific user
-    (io as any).emitToUser = (userId: string, event: string, data: any) => {
-        const socketId = userSockets.get(userId);
-        if (socketId) {
-            io.to(socketId).emit(event, data);
-            return true;
-        }
-        return false;
-    };
-
-    // Periodic cleanup of stale connections (every 30 seconds)
+    // Cleanup stale connections
     setInterval(() => {
         const connectedSockets = new Set(Array.from(io.sockets.sockets.keys()));
         let removedCount = 0;
 
-        // Clean up any mappings for disconnected sockets
         for (const [socketId, userId] of socketUsers.entries()) {
             if (!connectedSockets.has(socketId)) {
                 socketUsers.delete(socketId);
@@ -290,22 +381,13 @@ export function initializeSocket(server: HttpServer) {
         }
     }, 30000);
 
-    // Log server stats every 5 minutes
-    setInterval(() => {
-        console.log(`📊 Socket.io Stats:
-        - Connected Sockets: ${io.sockets.sockets.size}
-        - Online Users: ${userSockets.size}
-        - Socket Mappings: ${socketUsers.size}`);
-    }, 300000);
-
-    console.log('🚀 Socket.io server initialized with enhanced features');
+    console.log('🚀 Socket.io server initialized (SOCKET-FIRST MODE)');
     console.log('📡 Features enabled:');
-    console.log('   - User online/offline status');
-    console.log('   - Typing indicators');
-    console.log('   - Direct messaging');
-    console.log('   - Read receipts');
-    console.log('   - Connection health checks');
-    console.log('   - Automatic cleanup');
+    console.log('   ✅ Instant message delivery');
+    console.log('   ✅ Background database persistence');
+    console.log('   ✅ Offline message queue');
+    console.log('   ✅ Typing indicators');
+    console.log('   ✅ Read receipts');
 
     return io;
 }
