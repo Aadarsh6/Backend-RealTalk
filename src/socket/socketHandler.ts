@@ -94,9 +94,7 @@ export function initializeSocket(server: HttpServer) {
             }
         });
 
-        // ============================================
-        // INSTANT MESSAGE DELIVERY (NO WAITING!)
-        // ============================================
+//Instant message delivery
         socket.on('send-message', async (data: SendMessageData) => {
             const senderId = socketUsers.get(socket.id);
             
