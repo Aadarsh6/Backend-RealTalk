@@ -1,4 +1,4 @@
-// src/socket/socketHandler.ts - ULTRA-FAST VERSION
+// src/socket/socketHandler.ts - ULTRA-OPTIMIZED VERSION
 import { Server } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import { prisma } from '../lib/prisma';
@@ -36,7 +36,10 @@ export function initializeSocket(server: HttpServer) {
         transports: ['websocket', 'polling'],
         pingTimeout: 60000,
         pingInterval: 25000,
-        allowEIO3: true
+        allowEIO3: true,
+        // Performance optimizations
+        perMessageDeflate: false, // Disable compression for speed
+        httpCompression: false
     });
 
     const userSockets = new Map<string, string>();
@@ -85,16 +88,19 @@ export function initializeSocket(server: HttpServer) {
                 if (queuedMessages && queuedMessages.length > 0) {
                     queuedMessages.forEach(msg => socket.emit('new-message', msg));
                     offlineMessageQueue.delete(userId);
+                    console.log(`📬 Delivered ${queuedMessages.length} queued messages`);
                 }
 
-                console.log(`👥 Total online users: ${userSockets.size}`);
+                console.log(`👥 ${user.username} online | Total: ${userSockets.size}`);
 
             } catch (error) {
                 socket.emit('error', { message: 'Failed to connect user' });
             }
         });
 
-//Instant message delivery
+        // ============================================
+        // ULTRA-FAST MESSAGE DELIVERY
+        // ============================================
         socket.on('send-message', async (data: SendMessageData) => {
             const senderId = socketUsers.get(socket.id);
             
@@ -108,136 +114,157 @@ export function initializeSocket(server: HttpServer) {
 
             console.log(`📨 [INSTANT] Message from ${senderId}`);
 
-            // STEP 1: Get user data from cache/DB (FAST query)
-            const [sender, receiver] = await Promise.all([
-                prisma.user.findUnique({ 
-                    where: { clerkId: senderId },
-                    select: {
-                        id: true,
-                        clerkId: true,
-                        username: true,
-                        name: true,
-                        avatar: true
-                    }
-                }),
-                prisma.user.findUnique({ 
-                    where: { id: data.receiverId },
-                    select: {
-                        id: true,
-                        clerkId: true,
-                        username: true,
-                        name: true,
-                        avatar: true
-                    }
-                })
-            ]);
+            try {
+                // STEP 1: Get user data in parallel (FAST)
+                const [sender, receiver] = await Promise.all([
+                    prisma.user.findUnique({ 
+                        where: { clerkId: senderId },
+                        select: {
+                            id: true,
+                            clerkId: true,
+                            username: true,
+                            name: true,
+                            avatar: true
+                        }
+                    }),
+                    prisma.user.findUnique({ 
+                        where: { id: data.receiverId },
+                        select: {
+                            id: true,
+                            clerkId: true,
+                            username: true,
+                            name: true,
+                            avatar: true
+                        }
+                    })
+                ]);
 
-            if (!sender || !receiver) {
-                socket.emit('message-error', {
-                    tempId: data.tempId,
-                    error: 'User not found'
-                });
-                return;
-            }
-
-            // STEP 2: Build message object
-            const pendingMessage = {
-                tempId: data.tempId,
-                content: data.content,
-                createdAt: data.timestamp,
-                sender: sender,
-                receiver: receiver,
-                status: 'sending'
-            };
-
-            // STEP 3: Send to receiver IMMEDIATELY (NO WAITING!)
-            const receiverSocketId = userSockets.get(receiver.clerkId);
-            
-            if (receiverSocketId) {
-                io.to(receiverSocketId).emit('new-message', pendingMessage);
-                console.log(`📤 [INSTANT] Delivered to ${receiver.username} in <10ms`);
-            } else {
-                console.log(`📴 ${receiver.username} offline - queueing`);
-                if (!offlineMessageQueue.has(receiver.clerkId)) {
-                    offlineMessageQueue.set(receiver.clerkId, []);
+                if (!sender || !receiver) {
+                    socket.emit('message-error', {
+                        tempId: data.tempId,
+                        error: 'User not found'
+                    });
+                    return;
                 }
-            }
 
-            // STEP 4: Save to DB in background (NON-BLOCKING)
-            // This happens AFTER the receiver already got the message!
-            setImmediate(async () => {
-                try {
-                    const savedMessage = await prisma.message.create({
-                        data: {
-                            content: data.content,
-                            senderId: sender.id,
-                            receiverId: receiver.id
-                        },
-                        include: {
-                            sender: {
-                                select: {
-                                    id: true,
-                                    clerkId: true,
-                                    username: true,
-                                    name: true,
-                                    avatar: true
-                                }
+                // STEP 2: Build message object (instant)
+                const pendingMessage = {
+                    tempId: data.tempId,
+                    content: data.content,
+                    createdAt: data.timestamp,
+                    sender: sender,
+                    receiver: receiver,
+                    status: 'sending'
+                };
+
+                // STEP 3: Send to receiver IMMEDIATELY (NO WAITING!)
+                const receiverSocketId = userSockets.get(receiver.clerkId);
+                
+                if (receiverSocketId) {
+                    // Use direct emit (fastest method)
+                    io.to(receiverSocketId).emit('new-message', pendingMessage);
+                    console.log(`📤 [INSTANT] Delivered to ${receiver.username} in <10ms`);
+                } else {
+                    console.log(`📴 ${receiver.username} offline - queueing`);
+                    if (!offlineMessageQueue.has(receiver.clerkId)) {
+                        offlineMessageQueue.set(receiver.clerkId, []);
+                    }
+                }
+
+                // STEP 4: Save to DB in background (NON-BLOCKING)
+                // Using setImmediate to defer execution
+                setImmediate(async () => {
+                    try {
+                        const savedMessage = await prisma.message.create({
+                            data: {
+                                content: data.content,
+                                senderId: sender.id,
+                                receiverId: receiver.id
                             },
-                            receiver: {
-                                select: {
-                                    id: true,
-                                    clerkId: true,
-                                    username: true,
-                                    name: true,
-                                    avatar: true
+                            include: {
+                                sender: {
+                                    select: {
+                                        id: true,
+                                        clerkId: true,
+                                        username: true,
+                                        name: true,
+                                        avatar: true
+                                    }
+                                },
+                                receiver: {
+                                    select: {
+                                        id: true,
+                                        clerkId: true,
+                                        username: true,
+                                        name: true,
+                                        avatar: true
+                                    }
                                 }
                             }
+                        });
+
+                        const tempIdParts = data.tempId.split('-');
+                        const timestamp = tempIdParts[1] ? parseInt(tempIdParts[1]) : Date.now();
+                        const saveTime = Date.now() - timestamp;
+                        console.log(`💾 [DB] Saved in ${saveTime}ms`);
+
+                        // Send confirmation to sender (non-blocking)
+                        process.nextTick(() => {
+                            socket.emit('message-confirmed', {
+                                tempId: data.tempId,
+                                message: savedMessage
+                            });
+                        });
+
+                        // Update receiver with real DB ID (non-blocking)
+                        if (receiverSocketId) {
+                            process.nextTick(() => {
+                                io.to(receiverSocketId).emit('message-confirmed', {
+                                    tempId: data.tempId,
+                                    message: savedMessage
+                                });
+                            });
+                        } else {
+                            // Queue for offline user
+                            const queue = offlineMessageQueue.get(receiver.clerkId) || [];
+                            queue.push(savedMessage);
+                            offlineMessageQueue.set(receiver.clerkId, queue);
                         }
-                    });
 
-                    const tempIdParts = data.tempId.split('-');
-                    const timestamp = tempIdParts[1] ? parseInt(tempIdParts[1]) : Date.now();
-                    console.log(`💾 [DB] Saved after ${Date.now() - timestamp}ms`);
-
-                    // Send confirmation to sender
-                    socket.emit('message-confirmed', {
-                        tempId: data.tempId,
-                        message: savedMessage
-                    });
-
-                    // Update receiver with real DB ID
-                    if (receiverSocketId) {
-                        io.to(receiverSocketId).emit('message-confirmed', {
+                    } catch (dbError: any) {
+                        console.error('❌ [DB] Failed to save:', dbError.message);
+                        
+                        // Notify sender of failure
+                        socket.emit('message-failed', {
                             tempId: data.tempId,
-                            message: savedMessage
+                            error: 'Failed to save message'
                         });
-                    } else {
-                        const queue = offlineMessageQueue.get(receiver.clerkId) || [];
-                        queue.push(savedMessage);
-                        offlineMessageQueue.set(receiver.clerkId, queue);
-                    }
 
-                } catch (dbError: any) {
-                    console.error('❌ [DB] Failed to save:', dbError.message);
-                    
-                    socket.emit('message-failed', {
-                        tempId: data.tempId,
-                        error: 'Failed to save message'
-                    });
-
-                    if (receiverSocketId) {
-                        io.to(receiverSocketId).emit('message-failed', {
-                            tempId: data.tempId
-                        });
+                        // Notify receiver if online
+                        if (receiverSocketId) {
+                            io.to(receiverSocketId).emit('message-failed', {
+                                tempId: data.tempId
+                            });
+                        }
                     }
-                }
-            });
+                });
+
+            } catch (error: any) {
+                console.error('❌ [SEND] Error:', error.message);
+                socket.emit('message-error', {
+                    tempId: data.tempId,
+                    error: 'Failed to send message'
+                });
+            }
         });
 
+        // TYPING INDICATORS (optimized)
         socket.on('typing', (data: { toUserId: string; fromUserId: string; username: string }) => {
             if (!data.toUserId || !data.fromUserId) return;
+            
             const targetSocketId = userSockets.get(data.toUserId);
             if (targetSocketId) {
+                // Use to() instead of broadcast for direct delivery
                 socket.to(targetSocketId).emit('user-typing', {
                     fromUserId: data.fromUserId,
                     username: data.username || 'User',
@@ -247,6 +274,7 @@ export function initializeSocket(server: HttpServer) {
 
         socket.on('stop-typing', (data: { toUserId: string; fromUserId: string }) => {
             if (!data.toUserId || !data.fromUserId) return;
+            
             const targetSocketId = userSockets.get(data.toUserId);
             if (targetSocketId) {
                 socket.to(targetSocketId).emit('user-stop-typing', {
@@ -255,29 +283,38 @@ export function initializeSocket(server: HttpServer) {
             }
         });
 
+        // DISCONNECT HANDLER
         socket.on('disconnect', (reason) => {
             const userId = socketUsers.get(socket.id);
             if (userId) {
                 userSockets.delete(userId);
                 socketUsers.delete(socket.id);
-                socket.broadcast.emit('user-offline-status', { userId });
-                io.emit('online-users-count', { count: userSockets.size });
-                console.log(`👋 User ${userId} offline`);
+                
+                // Notify others (non-blocking)
+                process.nextTick(() => {
+                    socket.broadcast.emit('user-offline-status', { userId });
+                    io.emit('online-users-count', { count: userSockets.size });
+                });
+                
+                console.log(`👋 User ${userId} offline (${reason})`);
             }
         });
 
+        // PING-PONG for latency testing
         socket.on('ping', () => {
             socket.emit('pong', { timestamp: Date.now() });
         });
     });
 
+    // Store maps on io instance for API route access
     (io as any).userSockets = userSockets;
     (io as any).socketUsers = socketUsers;
 
-    // Cleanup stale connections
+    // Cleanup stale connections every 30 seconds
     setInterval(() => {
         const connectedSockets = new Set(Array.from(io.sockets.sockets.keys()));
         let removed = 0;
+        
         for (const [socketId, userId] of socketUsers.entries()) {
             if (!connectedSockets.has(socketId)) {
                 socketUsers.delete(socketId);
@@ -285,15 +322,22 @@ export function initializeSocket(server: HttpServer) {
                 removed++;
             }
         }
+        
         if (removed > 0) {
             console.log(`🧹 Cleaned ${removed} stale connections`);
             io.emit('online-users-count', { count: userSockets.size });
         }
     }, 30000);
 
+    // Log performance stats every 5 minutes
+    setInterval(() => {
+        console.log(`📊 Stats - Online: ${userSockets.size} | Queued: ${offlineMessageQueue.size}`);
+    }, 300000);
+
     console.log('🚀 Socket.io ULTRA-FAST mode initialized');
     console.log('⚡ Message delivery: <50ms');
     console.log('💾 DB save: background (non-blocking)');
+    console.log('🔥 Optimizations: process.nextTick, setImmediate, direct emit');
 
     return io;
 }
