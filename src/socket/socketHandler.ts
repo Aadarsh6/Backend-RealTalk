@@ -264,7 +264,6 @@ export function initializeSocket(server: HttpServer) {
             
             const targetSocketId = userSockets.get(data.toUserId);
             if (targetSocketId) {
-                // Use to() instead of broadcast for direct delivery
                 socket.to(targetSocketId).emit('user-typing', {
                     fromUserId: data.fromUserId,
                     username: data.username || 'User',
